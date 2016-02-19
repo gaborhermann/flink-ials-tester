@@ -27,7 +27,7 @@ object RandomSparseMatrixGen {
     val env = StreamExecutionEnvironment.getExecutionEnvironment
 
     env.addSource(new GeneratorSource(numCustomers, numStores, sparseness))
-      .writeAsCsv(output, WriteMode.OVERWRITE, 1000, "\n", ",")
+      .writeAsCsv(output, WriteMode.OVERWRITE, "\n", ",")
 
     env.execute("Flink uniformly random sparse matrix")
 

@@ -9,10 +9,24 @@
 	<version>0.1-SNAPSHOT</version>
 	<packaging>jar</packaging>
 
+	<repositories>
+		<repository>
+			<id>bintray-rnowling-bigpetstore</id>
+			<name>bintray</name>
+			<url>http://dl.bintray.com/rnowling/bigpetstore</url>
+		</repository>
+		<repository>
+			<id>cloudera-repos</id>
+			<name>cloudera</name>
+			<url>https://repository.cloudera.com/artifactory/cloudera-repos</url>
+		</repository>
+	</repositories>
+
 	<properties>
 		<scalaVersion>2.10</scalaVersion>
 		<sparkVersion>1.5.2</sparkVersion>
 		<flinkVersion>1.0-SNAPSHOT</flinkVersion>
+		<bpsDataVersion>0.2.1</bpsDataVersion>
 	</properties>
 
 	<dependencies>
@@ -51,6 +65,12 @@
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-clients_${scalaVersion}</artifactId>
 			<version>${flinkVersion}</version>
+		</dependency>
+
+		<dependency>
+			<groupId>com.github.rnowling.bigpetstore</groupId>
+			<artifactId>bigpetstore-data-generator</artifactId>
+			<version>${bpsDataVersion}</version>
 		</dependency>
 	</dependencies>
 
