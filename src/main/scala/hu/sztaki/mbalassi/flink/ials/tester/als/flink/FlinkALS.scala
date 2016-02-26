@@ -2,7 +2,9 @@ package hu.sztaki.mbalassi.flink.ials.tester.als.flink
 
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala._
-import org.apache.flink.ml.recommendation.ALS
+import org.apache.flink.ml.recommendation.{Spearman, ALS}
+
+import scala.collection.mutable.ArrayBuffer
 
 object FlinkALS {
   def main(args: Array[String]) {
@@ -36,7 +38,37 @@ object FlinkALS {
     model.fit(input)
 
     val test = env.fromCollection(for {x <- 0 to numCustomers; y <- 0 to numStores} yield (x, y))
+    val res = model.predict(test)//.print
 
-    model.predict(test).print
+//    val resA = new ArrayBuffer[(Int, Int, Double)]()
+//    res.map( x => resA+=x)
+    val resA = res.collect().toArray
+    println(resA.size)
+    val sp = Spearman
+    val ratings = resA.toArray
+//    val numUser = numCustomers
+//    val numItem = numStores
+//    val ranks = new ArrayBuffer[Array[(Double, Int)]](numUser)
+//    val ranksTemp = new ArrayBuffer[Array[(Double, Int)]](numUser)
+//    for(i <- 0 to numUser-1){
+//      ranks += new Array[(Double, Int)](numItem)
+//      ranksTemp += new Array[(Double, Int)](numItem)
+//    }
+//    for(i <- ratings.indices){
+//      val user = ratings(i)._1
+//      val item = ratings(i)._2
+//      println(user, item, ratings(i)._3)
+//      ranks(user)(item) = new Tuple2(ratings(i)._3, item)
+//    }
+//
+//    println(ranks(1)(1)._1)
+//    ranksTemp(0) = ranks(0).sortBy(_._1)
+//    for(i <- ranksTemp.indices){
+//      ranksTemp(i) = ranks(i).sortBy(_._1)
+//    }
+    val ranks = sp.ranks(ratings, numCustomers, numStores)
+    val fres = sp.averageCorr(ranks, ranks)
+    println(fres)
   }
+
 }
