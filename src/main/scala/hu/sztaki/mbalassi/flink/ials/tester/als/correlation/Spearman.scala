@@ -25,7 +25,6 @@ object Spearman {
     for(i <- ratings.indices){
       val user = ratings(i)._1
       val item = ratings(i)._2
-      println(i, ratings.length, user, numUser, item, numItem)
       ranks(user)(item) = new Tuple2(ratings(i)._3, item)
     }
 
