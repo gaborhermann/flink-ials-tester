@@ -31,8 +31,8 @@ object FlinkALS {
     val customers = input.map(_._1).distinct()
     val stores = input.map(_._2).distinct()
 
-    val numCustomers = customers.count()
-    val numStores = stores.count()
+    val numCustomers = customers.reduce((x1, x2) => (if(x1 > x2) x1 else x2)).collect()(0)
+    val numStores = stores.reduce((x1, x2) => (if(x1 > x2) x1 else x2)).collect()(0)
 
     println("-------------------------")
     println("NumCustomers: " + numCustomers)
@@ -50,16 +50,13 @@ object FlinkALS {
     model.fit(input)
 
     val test = customers cross stores
-//    val res = model.predict(test).print
-
-    val res=model.predict(test) //results from the prediction
-
-    val ratings=res.collect().toArray //transform the dataset to an array
+    val res = model.predict(test)
 
     val sp=Spearman
-    val ranks=sp.ranks(ratings, numCustomers.toInt, numStores.toInt) //compute the ranks per customers
 
-    val corr=sp.averageCorr(ranks, ranks)
+      val ranks = sp.ranks(res)
+      val averageCorr = sp.corr(ranks, ranks)
+      println(averageCorr)
   }
 
 }
