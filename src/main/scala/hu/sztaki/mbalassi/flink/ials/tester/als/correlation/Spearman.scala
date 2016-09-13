@@ -21,7 +21,7 @@ object Spearman {
 
     val res = ratings.groupBy(0).sortGroup(2, Order.DESCENDING).reduceGroup{
       (in, out: Collector[(Int, Int, Double, Int)]) =>
-        var rank = 0
+        var rank = 1
         for(t <- in){
           out.collect(t._1, t._2, t._3, rank)
           rank += 1
