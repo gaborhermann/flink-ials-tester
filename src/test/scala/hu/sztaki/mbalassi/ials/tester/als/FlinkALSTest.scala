@@ -62,5 +62,5 @@ class FlinkALSTest
 
     notRatedUserItemPairs(ratingsDS).collect().sortBy(identity) should be (expectedAllPairs)
   }
-  
+
 }
