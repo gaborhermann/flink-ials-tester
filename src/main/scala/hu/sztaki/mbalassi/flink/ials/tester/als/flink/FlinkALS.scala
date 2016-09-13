@@ -44,10 +44,15 @@ object FlinkALS {
       val env = ExecutionEnvironment.getExecutionEnvironment
 
       // Read and parse the input data: (timestamp, user, store == artist, 1)
-      val input = env.readCsvFile[(Int, Int, Double)](inputFile, fieldDelimiter = ",")
-      val test = notRatedUserItemPairs(input)
+      // last fm schema: 'time','user','item','id','score','eval'
+      val input = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
+        inputFile, fieldDelimiter = " ")
 
-      val rankings = trainAndGetRankings(input, test, alsParams)
+      val data = input.map(x => (x._2, x._3, x._5))
+
+      val test = notRatedUserItemPairs(data)
+
+      val rankings = trainAndGetRankings(data, test, alsParams)
 
       rankings.writeAsCsv(outputFile, fieldDelimiter = ",")
 
