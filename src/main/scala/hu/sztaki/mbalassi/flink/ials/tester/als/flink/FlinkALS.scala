@@ -4,6 +4,7 @@ import hu.sztaki.mbalassi.flink.ials.tester.als.correlation.Spearman
 import hu.sztaki.mbalassi.flink.ials.tester.utils.Utils
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala._
+import org.apache.flink.core.fs.FileSystem
 import org.apache.flink.ml.recommendation.ALS
 import org.apache.flink.util.Collector
 
@@ -38,6 +39,11 @@ object FlinkALS {
       val implicitPrefs = parsedArgs.getRequired("ALSImplicitPrefs").equals("true")
       val alpha = parsedArgs.getRequired("ALSAlpha").toInt
 
+      val topK = parsedArgs.getInt("RankingTopK", -1) match {
+        case -1 => None
+        case x => Some(x)
+      }
+
       val alsParams = ALSParams(iterations, blocks, numFactors, lambda, implicitPrefs, alpha)
 
       // initialize Flink environment
@@ -54,7 +60,13 @@ object FlinkALS {
 
       val rankings = trainAndGetRankings(data, test, alsParams)
 
-      rankings.writeAsCsv(outputFile, fieldDelimiter = ",")
+      // todo optimize: only calculate topK
+      // filter rankings, only show top k
+      val topKRankings = (for {k <- topK}
+        yield { rankings.filter(x => x._4 <= k) })
+        .getOrElse(rankings)
+
+      topKRankings.writeAsCsv(outputFile, fieldDelimiter = ",")
 
       env.execute()
     }).getOrElse {
@@ -77,11 +89,12 @@ object FlinkALS {
   }
 
   // todo make generic
-  type IntPair = (Int,Int)
+  type IntPair = (Int, Int)
 
   /**
     * Difference of two [[DataSet]]s.
     * Note, that only works on [[DataSet]]s containing distinct elements.
+    *
     * @param a
     * @param b
     * @return
@@ -111,7 +124,7 @@ object FlinkALS {
       .setImplicit(als.implicitPrefs)
       .setAlpha(als.alpha)
 
-    for { b <- als.blocks } yield {
+    for {b <- als.blocks} yield {
       model.setBlocks(b)
     }
 
