@@ -2,6 +2,7 @@ package hu.sztaki.mbalassi.flink.ials.tester.als.flink
 
 import hu.sztaki.mbalassi.flink.ials.tester.als.correlation.Spearman
 import hu.sztaki.mbalassi.flink.ials.tester.utils.Utils
+import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala._
 import org.apache.flink.ml.recommendation.ALS
@@ -22,38 +23,40 @@ object FlinkALS {
 
   def main(args: Array[String]) {
 
-    val propFile = Utils.parameterCheck(args)
+    val propFileOption = Utils.parameterCheck(args)
 
-    val parsedArgs = ParameterTool.fromPropertiesFile(propFile)
-    val inputFile = parsedArgs.getRequired("ALSInput")
-    val testInputFile = parsedArgs.getRequired("ALSTestInput")
-    val iterations = parsedArgs.getRequired("ALSIterations").toInt
-    val numFactors = parsedArgs.getRequired("ALSNumFactors").toInt
-    val lambda = parsedArgs.getRequired("ALSLambda").toDouble
-    val blocks = parsedArgs.getRequired("ALSBlocks").toInt
-    val implicitPrefs = parsedArgs.getRequired("ALSImplicitPrefs").equals("true")
-    val alpha = parsedArgs.getRequired("ALSAlpha").toInt
+    propFileOption.map(propFile => {
+      val parsedArgs = ParameterTool.fromPropertiesFile(propFile)
+      val inputFile = parsedArgs.getRequired("ALSInput")
+      val testInputFile = parsedArgs.getRequired("ALSTestInput")
+      val iterations = parsedArgs.getRequired("ALSIterations").toInt
+      val numFactors = parsedArgs.getRequired("ALSNumFactors").toInt
+      val lambda = parsedArgs.getRequired("ALSLambda").toDouble
+      val blocks = parsedArgs.getRequired("ALSBlocks").toInt
+      val implicitPrefs = parsedArgs.getRequired("ALSImplicitPrefs").equals("true")
+      val alpha = parsedArgs.getRequired("ALSAlpha").toInt
 
-    val env = ExecutionEnvironment.getExecutionEnvironment
+      val env = ExecutionEnvironment.getExecutionEnvironment
 
-    // Read and parse the input data: (timestamp, user, store == artist, 1)
-    val input = env.readCsvFile[(Long, Int, Int, Int)](inputFile, fieldDelimiter = " ")
-      .map(tuple => (tuple._2, tuple._3, 1.0))
+      // Read and parse the input data: (timestamp, user, store == artist, 1)
+      val input = env.readCsvFile[(Long, Int, Int, Int)](inputFile, fieldDelimiter = " ")
+        .map(tuple => (tuple._2, tuple._3, 1.0))
 
-    val customers = input.map(_._1).distinct()
-    val stores = input.map(_._2).distinct()
+      val customers = input.map(_._1).distinct()
+      val stores = input.map(_._2).distinct()
 
-    val numCustomers = customers.reduce((x1, x2) => (if (x1 > x2) x1 else x2)).collect()(0)
-    val numStores = stores.reduce((x1, x2) => (if (x1 > x2) x1 else x2)).collect()(0)
+      val numCustomers = customers.reduce((x1, x2) => (if (x1 > x2) x1 else x2)).collect()(0)
+      val numStores = stores.reduce((x1, x2) => (if (x1 > x2) x1 else x2)).collect()(0)
 
-    println("-------------------------")
-    println("NumCustomers: " + numCustomers)
-    println("NumStores: " + numStores)
-    println("-------------------------")
+      println("-------------------------")
+      println("NumCustomers: " + numCustomers)
+      println("NumStores: " + numStores)
+      println("-------------------------")
+    })
   }
 
   // todo test
-  def allUserItemPairs(data: DataSet[(Int,Int,Double)]): DataSet[(Int,Int)] = {
+  def allUserItemPairs(data: DataSet[(Int, Int, Double)]): DataSet[(Int, Int)] = {
     val users = data.map(_._1).distinct()
     val items = data.map(_._2).distinct()
 
@@ -61,22 +64,28 @@ object FlinkALS {
   }
 
   // todo test
-  def notRatedUserItemPairs(data: DataSet[(Int,Int,Double)]): DataSet[(Int,Int)] = {
-    val rated = data.map(x => (x._1,x._2)).distinct()
+  def notRatedUserItemPairs(data: DataSet[(Int, Int, Double)]): DataSet[(Int, Int)] = {
+    val rated = data.map(x => (x._1, x._2)).distinct()
     val all = allUserItemPairs(data)
 
     minus(all, rated)
   }
 
+  // todo make generic
+  type A = (Int,Int)
+
   // todo test
-  def minus[A](a: DataSet[A], b: DataSet[A]): DataSet[A] = {
-    a.fullOuterJoin(b).where(x => x).equalTo(x => x).apply(
-      (x: A, y: A, out: Collector[A]) => {
-        if (x != null && y == null) {
-          out.collect(x)
+  def minus(a: DataSet[A], b: DataSet[A]): DataSet[A] = {
+    a.fullOuterJoin(b)
+      .where(x => x)
+      .equalTo(x => x)
+      .apply(
+        (x: A, y: A, out: Collector[A]) => {
+          if (x != null && y == null) {
+            out.collect(x)
+          }
         }
-      }
-    )
+      )
   }
 
   def trainAndGetRankings(
@@ -94,7 +103,7 @@ object FlinkALS {
 
     model.fit(train)
 
-    val testToGivePreds = test.map(x => (x._1,x._2))
+    val testToGivePreds = test.map(x => (x._1, x._2))
 
     val predictions = model.predict(testToGivePreds)
 

@@ -20,6 +20,15 @@
 			<name>cloudera</name>
 			<url>https://repository.cloudera.com/artifactory/cloudera-repos</url>
 		</repository>
+		<repository>
+			<id>central</id>
+			<name>Maven Repository Switchboard</name>
+			<layout>default</layout>
+			<url>http://repo1.maven.org/maven2</url>
+			<snapshots>
+				<enabled>false</enabled>
+			</snapshots>
+		</repository>
 	</repositories>
 
 	<properties>
@@ -66,6 +75,14 @@
 			<artifactId>flink-clients_${scalaVersion}</artifactId>
 			<version>${flinkVersion}</version>
 		</dependency>
+
+
+		<!-- Test dependencies -->
+		<!--<dependency>-->
+			<!--<groupId>org.scalatest</groupId>-->
+			<!--<artifactId>scalatest_2.10</artifactId>-->
+			<!--<scope>test</scope>-->
+		<!--</dependency>-->
 
 		<dependency>
 			<groupId>com.github.rnowling.bigpetstore</groupId>
