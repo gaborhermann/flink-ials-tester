@@ -74,7 +74,13 @@ object FlinkALS {
   // todo make generic
   type A = (Int,Int)
 
-  // todo test
+  /**
+    * Difference of two [[DataSet]]s.
+    * Note, that only works on [[DataSet]]s containing distinct elements.
+    * @param a
+    * @param b
+    * @return
+    */
   def minus(a: DataSet[A], b: DataSet[A]): DataSet[A] = {
     a.fullOuterJoin(b)
       .where(x => x)
