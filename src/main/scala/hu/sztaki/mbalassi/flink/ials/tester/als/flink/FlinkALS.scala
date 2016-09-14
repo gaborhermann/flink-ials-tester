@@ -50,6 +50,7 @@ object FlinkALS {
       // initialize Flink environment
       val env = ExecutionEnvironment.getExecutionEnvironment
 
+      env.setParallelism(2)
       // Read and parse the input data: (timestamp, user, store == artist, 1)
       // last fm schema: 'time','user','item','id','score','eval'
       val input = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
@@ -63,10 +64,15 @@ object FlinkALS {
 
 
       val alsParamsTesting = for {
-        l <- Seq(1e-8,1e-6,1e-4,1e-2,0.1,0.2,0.4,0.8,1.0,2.0,4.0,8.0)
-        iter <- Seq(5,6,7,8)
+        l <- Seq(0.1)
+        f <- Seq(100)//,80,100,150,200)
+        iter <- Seq(10)
       } yield {
-        val currentALS = alsParams.copy(lambda = l, iterations = iter)
+        val currentALS = alsParams.copy(
+          numFactors = f,
+          implicitPrefs = true,
+          blocks = Some(30),
+          lambda = l, iterations = iter)
         val err = trainAndGetError(data, test, currentALS)
 
         currentALS.iterations + ", " +
@@ -159,14 +165,24 @@ object FlinkALS {
 
     val predicted = model.predict(test.map(x => (x._1, x._2)))
 
+    def preference(r: Double): Double = if (r == 0) 0 else 1
+    def confidence(r: Double): Double = 1 + als.alpha * r
+
     val error = test.join(predicted).where(0, 1).equalTo(0, 1)
       .map(x => {
-        val real = x._1._3
+        val r = x._1._3
         val pred = x._2._3
 
-        val d = real - pred
+        if (als.implicitPrefs) {
+          val p = preference(r)
+          val c = confidence(r)
 
-        d * d
+          val d = p - pred
+          c * d * d
+        } else {
+          val d = r - pred
+          d * d
+        }
       })
       .reduce(_ + _)
 
