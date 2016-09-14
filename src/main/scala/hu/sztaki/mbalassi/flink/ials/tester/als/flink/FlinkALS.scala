@@ -16,7 +16,10 @@ object FlinkALS {
                         numFactors: Int,
                         lambda: Double,
                         implicitPrefs: Boolean,
-                        alpha: Double
+                        alpha: Double,
+                        inputFile: String,
+                        testInputFile: String,
+                        outputFile: String
                       )
 
   def main(args: Array[String]) {
@@ -25,48 +28,34 @@ object FlinkALS {
 
     propFileOption.map(propFile => {
       // parse parameters
-      val parsedArgs = ParameterTool.fromPropertiesFile(propFile)
-      val inputFile = parsedArgs.getRequired("ALSInput")
-      val testInputFile = parsedArgs.getRequired("ALSTestInput")
-      val outputFile = parsedArgs.getRequired("ALSOutput")
-
-      val iterations = parsedArgs.getRequired("ALSIterations").toInt
-      val numFactors = parsedArgs.getRequired("ALSNumFactors").toInt
-      val lambda = parsedArgs.getRequired("ALSLambda").toDouble
-      val blocks = parsedArgs.getInt("ALSBlocks", -1) match {
-        case -1 => None
-        case x => Some(x)
-      }
-      val implicitPrefs = parsedArgs.getRequired("ALSImplicitPrefs").equals("true")
-      val alpha = parsedArgs.getRequired("ALSAlpha").toInt
-
-      val topK = parsedArgs.getInt("RankingTopK", -1) match {
-        case -1 => None
-        case x => Some(x)
-      }
-
-      val alsParams = ALSParams(iterations, blocks, numFactors, lambda, implicitPrefs, alpha)
+      val alsParams = parseALSParams(propFile)
 
       // initialize Flink environment
       val env = ExecutionEnvironment.getExecutionEnvironment
 
       env.setParallelism(2)
-      // Read and parse the input data: (timestamp, user, store == artist, 1)
+
+      // Read and parse the input data:
       // last fm schema: 'time','user','item','id','score','eval'
       val input = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
-        inputFile, fieldDelimiter = " ")
+        alsParams.inputFile, fieldDelimiter = " ")
 
       val testInput = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
-        testInputFile, fieldDelimiter = " ")
+        alsParams.testInputFile, fieldDelimiter = " ")
 
       val data = input.map(x => (x._2, x._3, x._5))
       val test = testInput.map(x => (x._2, x._3, x._5))
 
+      val dataCnt = data.count()
+      val testCnt = test.count()
+
+      println("train data size: " ++ dataCnt.toString)
+      println("test data size: " ++ testCnt.toString)
 
       val alsParamsTesting = for {
         l <- Seq(0.1)
-        f <- Seq(100)//,80,100,150,200)
-        iter <- Seq(10)
+        f <- Seq(20)//,80,100,150,200)
+        iter <- Seq()
       } yield {
         val currentALS = alsParams.copy(
           numFactors = f,
@@ -103,6 +92,31 @@ object FlinkALS {
     }).getOrElse {
       println("\n\tPlease provide a properties file!")
     }
+  }
+
+  def parseALSParams(filePath: String): ALSParams = {
+    val parsedArgs = ParameterTool.fromPropertiesFile(filePath)
+    val inputFile = parsedArgs.getRequired("ALSInput")
+    val testInputFile = parsedArgs.getRequired("ALSTestInput")
+    val outputFile = parsedArgs.getRequired("ALSOutput")
+
+    val iterations = parsedArgs.getRequired("ALSIterations").toInt
+    val numFactors = parsedArgs.getRequired("ALSNumFactors").toInt
+    val lambda = parsedArgs.getRequired("ALSLambda").toDouble
+    val blocks = parsedArgs.getInt("ALSBlocks", -1) match {
+      case -1 => None
+      case x => Some(x)
+    }
+    val implicitPrefs = parsedArgs.getRequired("ALSImplicitPrefs").equals("true")
+    val alpha = parsedArgs.getRequired("ALSAlpha").toInt
+
+    val topK = parsedArgs.getInt("RankingTopK", -1) match {
+      case -1 => None
+      case x => Some(x)
+    }
+
+    ALSParams(iterations, blocks, numFactors, lambda, implicitPrefs,
+      alpha, inputFile, testInputFile, outputFile)
   }
 
   def allUserItemPairs(data: DataSet[(Int, Int, Double)]): DataSet[(Int, Int)] = {
