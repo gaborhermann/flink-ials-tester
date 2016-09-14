@@ -27,6 +27,7 @@ object FlinkALS {
       // parse parameters
       val parsedArgs = ParameterTool.fromPropertiesFile(propFile)
       val inputFile = parsedArgs.getRequired("ALSInput")
+      val testInputFile = parsedArgs.getRequired("ALSTestInput")
       val outputFile = parsedArgs.getRequired("ALSOutput")
 
       val iterations = parsedArgs.getRequired("ALSIterations").toInt
@@ -54,21 +55,45 @@ object FlinkALS {
       val input = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
         inputFile, fieldDelimiter = " ")
 
+      val testInput = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
+        testInputFile, fieldDelimiter = " ")
+
       val data = input.map(x => (x._2, x._3, x._5))
+      val test = testInput.map(x => (x._2, x._3, x._5))
 
-      val test = notRatedUserItemPairs(data)
 
-      val rankings = trainAndGetRankings(data, test, alsParams)
+      val alsParamsTesting = for {
+        l <- Seq(1e-8,1e-6,1e-4,1e-2,0.1,0.2,0.4,0.8,1.0,2.0,4.0,8.0)
+        iter <- Seq(5,6,7,8)
+      } yield {
+        val currentALS = alsParams.copy(lambda = l, iterations = iter)
+        val err = trainAndGetError(data, test, currentALS)
 
-      // todo optimize: only calculate topK
-      // filter rankings, only show top k
-      val topKRankings = (for {k <- topK}
-        yield { rankings.filter(x => x._4 <= k) })
-        .getOrElse(rankings)
+        currentALS.iterations + ", " +
+          currentALS.numFactors + ", " +
+          currentALS.lambda + ", " +
+          currentALS.alpha +
+          "\t\t" + err
+      }
 
-      topKRankings.writeAsCsv(outputFile, fieldDelimiter = ",")
+      println("iter,numFact,lambda,alpha")
+      for { param <- alsParamsTesting } yield { println(param) }
 
-      env.execute()
+      ()
+      // GET THE RANKING
+      //      val test = notRatedUserItemPairs(data)
+      //
+      //      val rankings = trainAndGetRankings(data, test, alsParams)
+      //
+      //      // todo optimize: only calculate topK
+      //      // filter rankings, only show top k
+      //      val topKRankings = (for {k <- topK}
+      //        yield { rankings.filter(x => x._4 <= k) })
+      //        .getOrElse(rankings)
+      //
+      //      topKRankings.writeAsCsv(outputFile, fieldDelimiter = ",")
+      //
+      //      env.execute()
     }).getOrElse {
       println("\n\tPlease provide a properties file!")
     }
@@ -117,6 +142,42 @@ object FlinkALS {
                            test: DataSet[(Int, Int)],
                            als: ALSParams
                          ): DataSet[(Int, Int, Double, Int)] = {
+
+    val model = trainALS(train, als)
+
+    val predictions = model.predict(test)
+
+    Spearman.ranks(predictions)
+  }
+
+  def trainAndGetError(
+                        train: DataSet[(Int, Int, Double)],
+                        test: DataSet[(Int, Int, Double)],
+                        als: ALSParams
+                      ): Double = {
+    val model = trainALS(train, als)
+
+    val predicted = model.predict(test.map(x => (x._1, x._2)))
+
+    val error = test.join(predicted).where(0, 1).equalTo(0, 1)
+      .map(x => {
+        val real = x._1._3
+        val pred = x._2._3
+
+        val d = real - pred
+
+        d * d
+      })
+      .reduce(_ + _)
+
+    error.collect().head
+  }
+
+  def trainALS(
+                train: DataSet[(Int, Int, Double)],
+                als: ALSParams
+              ): ALS = {
+
     val model = ALS()
       .setNumFactors(als.numFactors)
       .setIterations(als.iterations)
@@ -130,9 +191,6 @@ object FlinkALS {
 
     model.fit(train)
 
-    val predictions = model.predict(test)
-
-    Spearman.ranks(predictions)
+    model
   }
-
 }
