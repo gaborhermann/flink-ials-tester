@@ -11,6 +11,26 @@ import org.apache.spark.rdd.RDD
 
 object SparkALS {
 
+  val smallRatings = Seq(
+    (0, 3, 1.0),
+    (0, 6, 2.0),
+    (0, 9, 1.0),
+    (1, 0, 1.0),
+    (1, 2, 3.0),
+    (1, 6, 1.0),
+    (1, 7, 5.0),
+    (1, 8, 1.0),
+    (2, 1, 1.0),
+    (2, 4, 3.0),
+    (3, 1, 2.0),
+    (3, 3, 4.0),
+    (3, 5, 5.0),
+    (4, 5, 1.0),
+    (4, 8, 2.0),
+    (4, 10, 2.0),
+    (5, 2, 1.0)
+  )
+
   def main(args: Array[String]) {
 
     val propFileOption = Utils.parameterCheck(args)
@@ -20,7 +40,7 @@ object SparkALS {
 
       // initialize Spark context
       // todo parse from params
-      val sparkMaster = "local[4]"
+      val sparkMaster = "local[1]"
       val sparkCheckpointDir = "/home/ghermann/sparkCheckpoint"
 
       val conf = new SparkConf(true).setMaster(sparkMaster)
@@ -40,29 +60,31 @@ object SparkALS {
         })
       }
 
-      val input = sc.textFile(alsParams.inputFile)
-      val testInput = sc.textFile(alsParams.testInputFile)
+//      val input = sc.textFile(alsParams.inputFile)
+//      val data = parseLastFMCsv(input)
+//
+//      val testInput = sc.textFile(alsParams.testInputFile)
+//      val test = parseLastFMCsv(testInput)
+//
+//      val dataCnt = data.count()
+//      val testCnt = test.count()
+//
+//      println("train data size: " ++ dataCnt.toString)
+//      println("test data size: " ++ testCnt.toString)
 
-      val data = parseLastFMCsv(input)
-      val test = parseLastFMCsv(testInput)
-
-      val dataCnt = data.count()
-      val testCnt = test.count()
-
-      println("train data size: " ++ dataCnt.toString)
-      println("test data size: " ++ testCnt.toString)
+      val data = sc.parallelize(smallRatings)
 
       val alsParamsTesting = for {
-        l <- Seq(0.1)
-        f <- Seq(20) //,80,100,150,200)
-        iter <- Seq(50)
+        l <- Seq(0)
+        f <- Seq(20)
+        iter <- Seq(10)
       } yield {
         val currentALS = alsParams.copy(
           numFactors = f,
-          implicitPrefs = true,
+          implicitPrefs = false,
           blocks = Some(30),
           lambda = l, iterations = iter)
-        val err = trainAndGetError(data, test, currentALS)
+        val err = trainAndGetImplicitCost(data, currentALS)
 
         currentALS.iterations + ", " +
           currentALS.numFactors + ", " +
@@ -75,8 +97,25 @@ object SparkALS {
       for {param <- alsParamsTesting} yield {
         println(param)
       }
-
-      ()
+//      val test = notRatedUserItemPairs(data)
+//
+//      val rankings = trainAndGetRankings(data, test, alsParams)
+//
+//      // todo optimize: only calculate topK
+//      // filter rankings, only show top k
+//      val topKRankings = (for {k <- alsParams.topK}
+//        yield {
+//          rankings.filter(x => x._4 <= k)
+//        })
+//        .getOrElse(rankings)
+//
+//      topKRankings
+//          .map{ case (u,i,s,r) =>
+//            u.toString ++ "," ++ i.toString ++ "," ++ s.toString ++ "," ++ r.toString
+//          }
+//        .saveAsTextFile(alsParams.outputFile)
+//
+//      ()
     }).getOrElse(println("\n\tPlease provide a param file"))
   }
 
@@ -118,21 +157,53 @@ object SparkALS {
       .predict(test)
       .map { case Rating(u, i, r) => (u, i, r) }
 
-    ranks(predictions)
+    ranks(predictions, topK = als.topK.getOrElse(100))
   }
 
-  def ranks(ratings: RDD[(Int, Int, Double)]): RDD[(Int, Int, Double, Int)] = {
-    //    val res = ratings.groupBy(0).sortGroup(2, Order.DESCENDING).reduceGroup{
-    //      (in, out: Collector[(Int, Int, Double, Int)]) =>
-    //        var rank = 1
-    //        for(t <- in){
-    //          out.collect(t._1, t._2, t._3, rank)
-    //          rank += 1
-    //        }
-    //    }
-    //    res
-    // todo
-    null
+  def ranks(ratings: RDD[(Int, Int, Double)], topK: Int): RDD[(Int, Int, Double, Int)] = {
+    import SparkUtils._
+
+    val ranks = topByKey(ratings.keyBy(_._1))(topK)(Ordering.by(_._3))
+      .flatMap { case (u, topRatings) => {
+        for {
+          ranking <- Seq.range(0, topRatings.length)
+        } yield {
+          topRatings(ranking) match {
+            case (_,i,score) => (u,i,score,ranking)
+          }
+        }
+      }}
+
+    ranks
+  }
+
+  def trainAndGetImplicitCost(
+                        train: RDD[(Int, Int, Double)],
+                        als: ALSParams
+                      ): Double = {
+    val model = trainALS(train, als)
+
+    val test = allUserItemPairs(train)
+
+    val predicted = model
+      .predict(test)
+      .map { case Rating(u, i, r) => ((u, i), r) }
+
+    val keyedTrain = train.map { case (u,i,r) => ((u,i),r)}
+
+    def preference(r: Double): Double = if (r == 0) 0 else 1
+    def confidence(r: Double): Double = 1 + als.alpha * r
+
+    val error = keyedTrain.fullOuterJoin(predicted)
+        .map {
+          case (_, (Some(r), Some(pred))) =>
+            confidence(r) * (1 - pred) * (1 - pred)
+          case (_, (None, Some(pred))) =>
+            1 * (0 - pred)
+        }
+      .reduce(_ + _)
+
+    error
   }
 
   def trainAndGetError(

@@ -19,7 +19,8 @@ object FlinkALS {
                         alpha: Double,
                         inputFile: String,
                         testInputFile: String,
-                        outputFile: String
+                        outputFile: String,
+                        topK: Option[Int]
                       )
 
   def main(args: Array[String]) {
@@ -33,62 +34,65 @@ object FlinkALS {
       // initialize Flink environment
       val env = ExecutionEnvironment.getExecutionEnvironment
 
-      env.setParallelism(2)
+      env.setParallelism(1)
 
       // Read and parse the input data:
       // last fm schema: 'time','user','item','id','score','eval'
       val input = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
         alsParams.inputFile, fieldDelimiter = " ")
 
-      val testInput = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
-        alsParams.testInputFile, fieldDelimiter = " ")
-
       val data = input.map(x => (x._2, x._3, x._5))
-      val test = testInput.map(x => (x._2, x._3, x._5))
 
-      val dataCnt = data.count()
-      val testCnt = test.count()
-
-      println("train data size: " ++ dataCnt.toString)
-      println("test data size: " ++ testCnt.toString)
-
-      val alsParamsTesting = for {
-        l <- Seq(0.1)
-        f <- Seq(20)//,80,100,150,200)
-        iter <- Seq()
-      } yield {
-        val currentALS = alsParams.copy(
-          numFactors = f,
-          implicitPrefs = true,
-          blocks = Some(30),
-          lambda = l, iterations = iter)
-        val err = trainAndGetError(data, test, currentALS)
-
-        currentALS.iterations + ", " +
-          currentALS.numFactors + ", " +
-          currentALS.lambda + ", " +
-          currentALS.alpha +
-          "\t\t" + err
-      }
-
-      println("iter,numFact,lambda,alpha")
-      for { param <- alsParamsTesting } yield { println(param) }
+      //      val testInput = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
+      //        alsParams.testInputFile, fieldDelimiter = " ")
+      //
+      //      val test = testInput.map(x => (x._2, x._3, x._5))
+      //
+      //      val dataCnt = data.count()
+      //      val testCnt = test.count()
+      //
+      //      println("train data size: " ++ dataCnt.toString)
+      //      println("test data size: " ++ testCnt.toString)
+      //
+      //      val alsParamsTesting = for {
+      //        l <- Seq(0.1)
+      //        f <- Seq(20)//,80,100,150,200)
+      //        iter <- Seq()
+      //      } yield {
+      //        val currentALS = alsParams.copy(
+      //          numFactors = f,
+      //          implicitPrefs = true,
+      //          blocks = Some(30),
+      //          lambda = l, iterations = iter)
+      //        val err = trainAndGetError(data, test, currentALS)
+      //
+      //        currentALS.iterations + ", " +
+      //          currentALS.numFactors + ", " +
+      //          currentALS.lambda + ", " +
+      //          currentALS.alpha +
+      //          "\t\t" + err
+      //      }
+      //
+      //      println("iter,numFact,lambda,alpha")
+      //      for { param <- alsParamsTesting } yield { println(param) }
 
       ()
-      // GET THE RANKING
-      //      val test = notRatedUserItemPairs(data)
-      //
-      //      val rankings = trainAndGetRankings(data, test, alsParams)
-      //
-      //      // todo optimize: only calculate topK
-      //      // filter rankings, only show top k
-      //      val topKRankings = (for {k <- topK}
-      //        yield { rankings.filter(x => x._4 <= k) })
-      //        .getOrElse(rankings)
-      //
-      //      topKRankings.writeAsCsv(outputFile, fieldDelimiter = ",")
-      //
-      //      env.execute()
+      //       GET THE RANKING
+      val test = notRatedUserItemPairs(data)
+
+      val rankings = trainAndGetRankings(data, test, alsParams)
+
+      // todo optimize: only calculate topK
+      // filter rankings, only show top k
+      val topKRankings = (for {k <- alsParams.topK}
+        yield {
+          rankings.filter(x => x._4 <= k)
+        })
+        .getOrElse(rankings)
+
+      topKRankings.writeAsCsv(alsParams.outputFile, fieldDelimiter = ",")
+
+      env.execute()
     }).getOrElse {
       println("\n\tPlease provide a properties file!")
     }
@@ -116,7 +120,7 @@ object FlinkALS {
     }
 
     ALSParams(iterations, blocks, numFactors, lambda, implicitPrefs,
-      alpha, inputFile, testInputFile, outputFile)
+      alpha, inputFile, testInputFile, outputFile, topK)
   }
 
   def allUserItemPairs(data: DataSet[(Int, Int, Double)]): DataSet[(Int, Int)] = {
