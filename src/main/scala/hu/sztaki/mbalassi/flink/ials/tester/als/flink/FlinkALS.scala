@@ -10,6 +10,26 @@ import org.apache.flink.util.Collector
 
 object FlinkALS {
 
+  val smallRatings = Seq(
+    (0, 3, 1.0),
+    (0, 6, 2.0),
+    (0, 9, 1.0),
+    (1, 0, 1.0),
+    (1, 2, 3.0),
+    (1, 6, 1.0),
+    (1, 7, 5.0),
+    (1, 8, 1.0),
+    (2, 1, 1.0),
+    (2, 4, 3.0),
+    (3, 1, 2.0),
+    (3, 3, 4.0),
+    (3, 5, 5.0),
+    (4, 5, 1.0),
+    (4, 8, 2.0),
+    (4, 10, 2.0),
+    (5, 2, 1.0)
+  )
+
   case class ALSParams(
                         iterations: Int,
                         blocks: Option[Int],
@@ -38,61 +58,66 @@ object FlinkALS {
 
       // Read and parse the input data:
       // last fm schema: 'time','user','item','id','score','eval'
-      val input = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
-        alsParams.inputFile, fieldDelimiter = " ")
+//      val input = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
+//        alsParams.inputFile, fieldDelimiter = " ")
 
-      val data = input.map(x => (x._2, x._3, x._5))
+//      val data = input.map(x => (x._2, x._3, x._5))
 
-      //      val testInput = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
-      //        alsParams.testInputFile, fieldDelimiter = " ")
-      //
-      //      val test = testInput.map(x => (x._2, x._3, x._5))
-      //
-      //      val dataCnt = data.count()
-      //      val testCnt = test.count()
-      //
-      //      println("train data size: " ++ dataCnt.toString)
-      //      println("test data size: " ++ testCnt.toString)
-      //
-      //      val alsParamsTesting = for {
-      //        l <- Seq(0.1)
-      //        f <- Seq(20)//,80,100,150,200)
-      //        iter <- Seq()
-      //      } yield {
-      //        val currentALS = alsParams.copy(
-      //          numFactors = f,
-      //          implicitPrefs = true,
-      //          blocks = Some(30),
-      //          lambda = l, iterations = iter)
-      //        val err = trainAndGetError(data, test, currentALS)
-      //
-      //        currentALS.iterations + ", " +
-      //          currentALS.numFactors + ", " +
-      //          currentALS.lambda + ", " +
-      //          currentALS.alpha +
-      //          "\t\t" + err
-      //      }
-      //
-      //      println("iter,numFact,lambda,alpha")
-      //      for { param <- alsParamsTesting } yield { println(param) }
+      val data = env.fromCollection(smallRatings)
+//      val testInput = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
+//        alsParams.testInputFile, fieldDelimiter = " ")
+//
+//      val test = testInput.map(x => (x._2, x._3, x._5))
+//
+//      val dataCnt = data.count()
+//      val testCnt = test.count()
+//
+//      println("train data size: " ++ dataCnt.toString)
+//      println("test data size: " ++ testCnt.toString)
+
+      val alsParamsTesting = for {
+        l <- Seq(1)
+        f <- Seq(4) //,80,100,150,200)
+        iter <- Seq(50)
+        a <- Seq(40)
+      } yield {
+        val currentALS = alsParams.copy(
+          numFactors = f,
+          implicitPrefs = true,
+          blocks = Some(30),
+          lambda = l, iterations = iter,
+          alpha = a)
+        val err = trainAndGetImplicitCost(data, currentALS)
+
+        currentALS.iterations + ", " +
+          currentALS.numFactors + ", " +
+          currentALS.lambda + ", " +
+          currentALS.alpha +
+          "\t\t" + err
+      }
+
+      println("iter,numFact,lambda,alpha")
+      for {param <- alsParamsTesting} yield {
+        println(param)
+      }
 
       ()
       //       GET THE RANKING
-      val test = notRatedUserItemPairs(data)
-
-      val rankings = trainAndGetRankings(data, test, alsParams)
-
-      // todo optimize: only calculate topK
-      // filter rankings, only show top k
-      val topKRankings = (for {k <- alsParams.topK}
-        yield {
-          rankings.filter(x => x._4 <= k)
-        })
-        .getOrElse(rankings)
-
-      topKRankings.writeAsCsv(alsParams.outputFile, fieldDelimiter = ",")
-
-      env.execute()
+//      val test = notRatedUserItemPairs(data)
+//
+//      val rankings = trainAndGetRankings(data, test, alsParams)
+//
+//      // todo optimize: only calculate topK
+//      // filter rankings, only show top k
+//      val topKRankings = (for {k <- alsParams.topK}
+//        yield {
+//          rankings.filter(x => x._4 <= k)
+//        })
+//        .getOrElse(rankings)
+//
+//      topKRankings.writeAsCsv(alsParams.outputFile, fieldDelimiter = ",")
+//
+//      env.execute()
     }).getOrElse {
       println("\n\tPlease provide a properties file!")
     }
@@ -174,6 +199,40 @@ object FlinkALS {
     Spearman.ranks(predictions)
   }
 
+  def trainAndGetImplicitCost(
+                               train: DataSet[(Int, Int, Double)],
+                               als: ALSParams
+                             ): Double = {
+    val model = trainALS(train, als)
+
+    val test = allUserItemPairs(train)
+    val predicted = model.predict(test)
+
+    def preference(r: Double): Double = if (r == 0) 0 else 1
+    def confidence(r: Double): Double = 1 + als.alpha * r
+
+    val cost =
+      train.fullOuterJoin(predicted).where(0, 1).equalTo(0, 1)
+        .apply((x: (Int, Int, Double), y: (Int, Int, Double), out: Collector[Double]) => {
+          if (x == null && y != null) {
+            // there was no rating, so preference = 0, confidence = 1
+            val pred = y._3
+            out.collect(pred * pred)
+          } else if (x != null && y != null) {
+            // there was rating, so ...
+            val r = x._3
+            val pred = y._3
+            val p = preference(r)
+            val c = confidence(r)
+
+            val d = p - pred
+            out.collect(c * d * d)
+          }
+        }).reduce(_ + _)
+
+    cost.collect().head
+  }
+
   def trainAndGetError(
                         train: DataSet[(Int, Int, Double)],
                         test: DataSet[(Int, Int, Double)],
@@ -218,6 +277,7 @@ object FlinkALS {
       .setLambda(als.lambda)
       .setImplicit(als.implicitPrefs)
       .setAlpha(als.alpha)
+//      .setSeed(42)
 
     for {b <- als.blocks} yield {
       model.setBlocks(b)
