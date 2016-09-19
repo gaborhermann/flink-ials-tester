@@ -58,12 +58,12 @@ object FlinkALS {
 
       // Read and parse the input data:
       // last fm schema: 'time','user','item','id','score','eval'
-//      val input = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
-//        alsParams.inputFile, fieldDelimiter = " ")
+      val input = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
+        alsParams.inputFile, fieldDelimiter = " ")
 
-//      val data = input.map(x => (x._2, x._3, x._5))
+      val data = input.map(x => (x._2, x._3, x._5))
 
-      val data = env.fromCollection(smallRatings)
+//      val data = env.fromCollection(smallRatings)
 //      val testInput = env.readCsvFile[(Long, Int, Int, Long, Double, Double)](
 //        alsParams.testInputFile, fieldDelimiter = " ")
 //
@@ -74,50 +74,43 @@ object FlinkALS {
 //
 //      println("train data size: " ++ dataCnt.toString)
 //      println("test data size: " ++ testCnt.toString)
-
-      val alsParamsTesting = for {
-        l <- Seq(1)
-        f <- Seq(4) //,80,100,150,200)
-        iter <- Seq(50)
-        a <- Seq(40)
-      } yield {
-        val currentALS = alsParams.copy(
-          numFactors = f,
-          implicitPrefs = true,
-          blocks = Some(30),
-          lambda = l, iterations = iter,
-          alpha = a)
-        val err = trainAndGetImplicitCost(data, currentALS)
-
-        currentALS.iterations + ", " +
-          currentALS.numFactors + ", " +
-          currentALS.lambda + ", " +
-          currentALS.alpha +
-          "\t\t" + err
-      }
-
-      println("iter,numFact,lambda,alpha")
-      for {param <- alsParamsTesting} yield {
-        println(param)
-      }
+//
+//      val alsParamsTesting = for {
+//        l <- Seq(0.1)
+//        f <- Seq(10) //,80,100,150,200)
+//        iter <- Seq(20)
+//        a <- Seq(40)
+//      } yield {
+//        val currentALS = alsParams.copy(
+//          numFactors = f,
+//          implicitPrefs = true,
+//          blocks = Some(30),
+//          lambda = l, iterations = iter,
+//          alpha = a)
+//        val err = trainAndGetImplicitCost(data, currentALS)
+//
+//        currentALS.iterations + ", " +
+//          currentALS.numFactors + ", " +
+//          currentALS.lambda + ", " +
+//          currentALS.alpha +
+//          "\t\t" + err
+//      }
+//
+//      println("iter,numFact,lambda,alpha")
+//      for {param <- alsParamsTesting} yield {
+//        println(param)
+//      }
 
       ()
       //       GET THE RANKING
-//      val test = notRatedUserItemPairs(data)
-//
-//      val rankings = trainAndGetRankings(data, test, alsParams)
-//
-//      // todo optimize: only calculate topK
-//      // filter rankings, only show top k
-//      val topKRankings = (for {k <- alsParams.topK}
-//        yield {
-//          rankings.filter(x => x._4 <= k)
-//        })
-//        .getOrElse(rankings)
-//
-//      topKRankings.writeAsCsv(alsParams.outputFile, fieldDelimiter = ",")
-//
-//      env.execute()
+      val test = notRatedUserItemPairs(data)
+
+      val topK = alsParams.topK.getOrElse(100)
+      val rankings = trainAndGetRankings(data, test, alsParams, topK)
+
+      rankings.writeAsCsv(alsParams.outputFile, fieldDelimiter = ",")
+
+      env.execute()
     }).getOrElse {
       println("\n\tPlease provide a properties file!")
     }
@@ -189,14 +182,15 @@ object FlinkALS {
   def trainAndGetRankings(
                            train: DataSet[(Int, Int, Double)],
                            test: DataSet[(Int, Int)],
-                           als: ALSParams
+                           als: ALSParams,
+                           topK: Int
                          ): DataSet[(Int, Int, Double, Int)] = {
 
     val model = trainALS(train, als)
 
     val predictions = model.predict(test)
 
-    Spearman.ranks(predictions)
+    Spearman.ranks(predictions, topK)
   }
 
   def trainAndGetImplicitCost(

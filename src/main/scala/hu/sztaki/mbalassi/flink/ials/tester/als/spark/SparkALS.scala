@@ -40,7 +40,7 @@ object SparkALS {
 
       // initialize Spark context
       // todo parse from params
-      val sparkMaster = "local[1]"
+      val sparkMaster = "local[4]"
       val sparkCheckpointDir = "/home/ghermann/sparkCheckpoint"
 
       val conf = new SparkConf(true).setMaster(sparkMaster)
@@ -60,8 +60,10 @@ object SparkALS {
         })
       }
 
-//      val input = sc.textFile(alsParams.inputFile)
-//      val data = parseLastFMCsv(input)
+      val input = sc.textFile(alsParams.inputFile)
+      val data = parseLastFMCsv(input)
+
+//      input.sample(true)
 //
 //      val testInput = sc.textFile(alsParams.testInputFile)
 //      val test = parseLastFMCsv(testInput)
@@ -71,59 +73,75 @@ object SparkALS {
 //
 //      println("train data size: " ++ dataCnt.toString)
 //      println("test data size: " ++ testCnt.toString)
+//
+//      val data = sc.parallelize(smallRatings)
+//
+//      val alsParamsTesting = for {
+//        l <- Seq(0)
+//        f <- Seq(20)
+//        iter <- Seq(10)
+//      } yield {
+//        val currentALS = alsParams.copy(
+//          numFactors = f,
+//          implicitPrefs = false,
+//          blocks = Some(30),
+//          lambda = l, iterations = iter)
+//        val err = trainAndGetImplicitCost(data, currentALS)
+//
+//        currentALS.iterations + ", " +
+//          currentALS.numFactors + ", " +
+//          currentALS.lambda + ", " +
+//          currentALS.alpha +
+//          "\t\t" + err
+//      }
+//
+//      println("iter,numFact,lambda,alpha")
+//      for {param <- alsParamsTesting} yield {
+//        println(param)
+//      }
 
-      val data = sc.parallelize(smallRatings)
-
-      val alsParamsTesting = for {
-        l <- Seq(0)
-        f <- Seq(20)
-        iter <- Seq(10)
-      } yield {
-        val currentALS = alsParams.copy(
-          numFactors = f,
-          implicitPrefs = false,
-          blocks = Some(30),
-          lambda = l, iterations = iter)
-        val err = trainAndGetImplicitCost(data, currentALS)
-
-        currentALS.iterations + ", " +
-          currentALS.numFactors + ", " +
-          currentALS.lambda + ", " +
-          currentALS.alpha +
-          "\t\t" + err
-      }
-
-      println("iter,numFact,lambda,alpha")
-      for {param <- alsParamsTesting} yield {
-        println(param)
-      }
+//      val uCnt = data.map{ case (u,i,_) => i }.distinct().count()
+      val cnt = allUserItemPairs(data).count
+//      println("CNT: " + uCnt)
 //      val test = notRatedUserItemPairs(data)
 //
 //      val rankings = trainAndGetRankings(data, test, alsParams)
 //
-//      // todo optimize: only calculate topK
-//      // filter rankings, only show top k
-//      val topKRankings = (for {k <- alsParams.topK}
-//        yield {
-//          rankings.filter(x => x._4 <= k)
-//        })
-//        .getOrElse(rankings)
-//
-//      topKRankings
+//      rankings
 //          .map{ case (u,i,s,r) =>
 //            u.toString ++ "," ++ i.toString ++ "," ++ s.toString ++ "," ++ r.toString
 //          }
 //        .saveAsTextFile(alsParams.outputFile)
 //
-//      ()
+      ()
     }).getOrElse(println("\n\tPlease provide a param file"))
   }
 
   def allUserItemPairs(data: RDD[(Int, Int, Double)]): RDD[(Int, Int)] = {
-    val users = data.map(_._1).distinct()
-    val items = data.map(_._2).distinct()
+//    val users = data.map(_._1).distinct()
+//    val items = data.map(_._2).distinct()
+//
+//    users.cartesian(items)
+    val users = data.map(_._1).distinct().collect()
+    val items = data.map(_._2).distinct().collect()
 
-    users.cartesian(items)
+    println("ITEMS: " + users.length * items.length)
+    var pairs = new Array[(Int,Int)](10)
+    var i = 0
+    var j = 0
+    while (i < users.length && j < items.length){
+      pairs(i * items.length + j) = (users(i),items(j))
+
+      i = i + 1
+      j = j + 1
+
+      if (j % 2000 == 0 && i % 2000 == 0) {
+        println("ij: " + i.toString + "," + j.toString)
+      }
+
+    }
+//    println("CNT: " + pairs.count(_ => true))
+    null
   }
 
   def notRatedUserItemPairs(data: RDD[(Int, Int, Double)]): RDD[(Int, Int)] = {
